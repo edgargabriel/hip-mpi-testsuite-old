@@ -36,6 +36,8 @@ EXECS = hip_pt2pt_nb           \
 	hip_osc_acc_fence      \
 	hip_osc_acc_lock       \
 	hip_osc_put_lock       \
+	hip_file_write         \
+	hip_file_iwrite        \
 	hip_osc_get_lock @HIP_QUERY_TEST@
 
 
@@ -49,7 +51,7 @@ hip_scatterv: hip_scatter.cc $(HEADERS)
 
 hip_reduce_scatter: hip_reduce_scatter.cc $(HEADERS)
 	$(CXX) $(CPPFLAGS) -o hip_reduce_scatter hip_reduce_scatter.cc $(LDFLAGS)
-	
+
 hip_pt2pt_bl: hip_pt2pt_bl.cc $(HEADERS)
 	$(CXX) $(CPPFLAGS) -o hip_pt2pt_bl hip_pt2pt_bl.cc $(LDFLAGS)
 
@@ -131,6 +133,12 @@ hip_type_struct_short: hip_ddt.cc $(HEADERS)
 hip_type_struct_long: hip_ddt.cc $(HEADERS)
 	$(CXX) $(CPPFLAGS) -o hip_type_struct_long hip_ddt.cc -DHIP_TYPE_STRUCT -DA_WIDTH=1024 $(LDFLAGS)
 
+hip_file_write: hip_file_write.cc $(HEADERS)
+	$(CXX) $(CPPFLAGS) -o hip_file_write hip_file_write.cc $(LDFLAGS)
+
+hip_file_iwrite: hip_file_write.cc $(HEADERS)
+	$(CXX) $(CPPFLAGS) -o hip_file_iwrite hip_file_write.cc -DHIP_MPITEST_FILE_IWRITE $(LDFLAGS)
+
 ifeq ( $(HAVE_mpix_query_rocm), 1 )
 hip_query_test: hip_query_test.cc
 	$(CXX) $(CPPFLAGS) -o hip_query_test hip_query_test.cc $(LDFLAGS)
@@ -145,4 +153,4 @@ clean:
 	$(RM) hip_type_resized_short hip_type_struct_short
 	$(RM) hip_type_resized_long hip_type_struct_long
 	$(RM) hip_osc_put_fence hip_osc_get_fence hip_osc_acc_fence hip_osc_acc_lock hip_osc_put_lock hip_osc_get_lock
-	$(RM) hip_query_test
+	$(RM) hip_query_test hip_file_write hip_file_iwrite
