@@ -78,8 +78,11 @@ int allgather_test (void *sendbuf, void *recvbuf, int count,
 
 int main (int argc, char *argv[])
 {
-    int res;
+    int ret;
     int rank, size;
+    std::chrono::high_resolution_clock::time_point t1s, t1e;
+    double t1;
+    double *tmp_sendbuf=NULL, *tmp_recvbuf=NULL;
 
     bind_device();
 
@@ -97,51 +100,51 @@ int main (int argc, char *argv[])
     }
 
     for (elements = 1; elements <= max_elements; elements *= 2) {
-        double *tmp_sendbuf=NULL, *tmp_recvbuf=NULL;
         int niter = elements >= NITER_THRESH ? NITER_LONG : NITER_SHORT;
+        tmp_sendbuf = NULL;
+        tmp_recvbuf = NULL;
 
         // Initialise send buffer
         ALLOCATE_SENDBUFFER(sendbuf, tmp_sendbuf, double, size*elements, sizeof(double),
-                            rank, MPI_COMM_WORLD, init_sendbuf);
+                            rank, MPI_COMM_WORLD, init_sendbuf, out);
 
         // Initialize recv buffer
         ALLOCATE_RECVBUFFER(recvbuf, tmp_recvbuf, double, size*elements, sizeof(double),
-                            rank, MPI_COMM_WORLD, init_recvbuf);
+                            rank, MPI_COMM_WORLD, init_recvbuf, out);
 
         //Warmup
-        res = allgather_test (sendbuf->get_buffer(), recvbuf->get_buffer(), elements,
+        ret = allgather_test (sendbuf->get_buffer(), recvbuf->get_buffer(), elements,
                               MPI_DOUBLE, MPI_COMM_WORLD, 1);
-        if (MPI_SUCCESS != res ) {
+        if (MPI_SUCCESS != ret) {
             fprintf(stderr, "Error in allgather_test. Aborting\n");
-            MPI_Abort (MPI_COMM_WORLD, 1);
-            return 1;
+            goto out;
         }
 
         // execute the allreduce test
         MPI_Barrier(MPI_COMM_WORLD);
-        auto t1s = std::chrono::high_resolution_clock::now();
-        res = allgather_test (sendbuf->get_buffer(), recvbuf->get_buffer(), elements,
+        t1s = std::chrono::high_resolution_clock::now();
+        ret = allgather_test (sendbuf->get_buffer(), recvbuf->get_buffer(), elements,
                               MPI_DOUBLE, MPI_COMM_WORLD, niter);
-        if (MPI_SUCCESS != res) {
+        if (MPI_SUCCESS != ret) {
             fprintf(stderr, "Error in allgather_test. Aborting\n");
-            MPI_Abort (MPI_COMM_WORLD, 1);
-            return 1;
+            goto out;
         }
-        auto t1e = std::chrono::high_resolution_clock::now();
-        double t1 = std::chrono::duration<double>(t1e-t1s).count();
+        t1e = std::chrono::high_resolution_clock::now();
+        t1 = std::chrono::duration<double>(t1e-t1s).count();
 
 #if 0
         // verify results
-        bool ret = true;
+        bool res, fret;
+        res = true;
         if (recvbuf->NeedsStagingBuffer()) {
             HIP_CHECK(recvbuf->CopyFrom(tmp_recvbuf, elements*size*sizeof(double)));
-            ret = check_recvbuf(tmp_recvbuf, size, rank, elements);
+            res = check_recvbuf(tmp_recvbuf, size, rank, elements);
         }
         else {
-            ret = check_recvbuf((double*) recvbuf->get_buffer(), size, rank, elements);
+            res = check_recvbuf((double*) recvbuf->get_buffer(), size, rank, elements);
         }
 
-        bool fret = report_testresult(argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(), ret);
+        fret = report_testresult(argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(), res);
 #endif
         bench_performance (argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(),
                            elements, (size_t)(elements * sizeof(double)), niter, t1);
@@ -150,11 +153,16 @@ int main (int argc, char *argv[])
         FREE_BUFFER(sendbuf, tmp_sendbuf);
         FREE_BUFFER(recvbuf, tmp_recvbuf);
     }
+ out:
+    if (MPI_SUCCESS != ret) {
+        FREE_BUFFER(sendbuf, tmp_sendbuf);
+        FREE_BUFFER(recvbuf, tmp_recvbuf);
+    }
     delete (sendbuf);
     delete (recvbuf);
 
     MPI_Finalize ();
-    return 0;
+    return ret;
 }
 
 

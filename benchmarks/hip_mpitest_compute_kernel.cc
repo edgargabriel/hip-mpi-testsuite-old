@@ -65,6 +65,8 @@ static void init_buf(long *array, double *farray,  int dim)
 
 int hip_mpitest_compute_init (hip_mpitest_compute_params_t &params)
 {
+    int ret;
+
     //Hardcoding these parameters for now, can revisit later if necessary.
     params.N       = 64*1024*1024;
     params.K       = 13604;
@@ -74,7 +76,8 @@ int hip_mpitest_compute_init (hip_mpitest_compute_params_t &params)
     params.Ahost  = (long*) malloc (params.N * sizeof(long));
     params.Afhost = (double*) malloc (params.N * sizeof(double));
     if (NULL == params.Ahost || NULL == params.Afhost) {
-        return 1;
+        ret = MPI_ERR_OTHER;
+        goto out;
     }
     init_buf(params.Ahost, params.Afhost, params.N);
 
@@ -84,19 +87,25 @@ int hip_mpitest_compute_init (hip_mpitest_compute_params_t &params)
     HIP_CHECK(hipMemcpy(params.Afdevice, params.Afhost, params.N*sizeof(double), hipMemcpyDefault));
 
     HIP_CHECK(hipStreamCreate(&params.stream));
-    return 0;
+ out:
+    return ret;
 }
 
 void hip_mpitest_compute_set_params(hip_mpitest_compute_params_t &params, double runtime)
 {
-    double t1;
+    double t1, t10;
+    double slope, dist, est;
+    long estimated_niter;
+    int ret;
     int prev_K=0;
+    std::chrono::high_resolution_clock::time_point t1s, t1e, t10s, t10e, ts, te;
+
     do {
-        auto t1s = std::chrono::high_resolution_clock::now();
+        t1s = std::chrono::high_resolution_clock::now();
         params.niter = 1;
         hip_mpitest_compute_launch (params);
         HIP_CHECK(hipStreamSynchronize(params.stream));
-        auto t1e = std::chrono::high_resolution_clock::now();
+        t1e = std::chrono::high_resolution_clock::now();
         t1 = std::chrono::duration<double>(t1e-t1s).count();
 
         if (t1 > runtime* params.Rthresh) {
@@ -105,35 +114,41 @@ void hip_mpitest_compute_set_params(hip_mpitest_compute_params_t &params, double
         prev_K = params.K;
     } while (params.K > params.Kthresh && prev_K != params.K);
 
-    auto t10s = std::chrono::high_resolution_clock::now();
+    t10s = std::chrono::high_resolution_clock::now();
     params.niter = 10;
-    hip_mpitest_compute_launch (params);
+    HIP_CHECK(hip_mpitest_compute_launch (params));
     HIP_CHECK(hipStreamSynchronize(params.stream));
-    auto t10e = std::chrono::high_resolution_clock::now();
-    double t10 = std::chrono::duration<double>(t10e-t10s).count();
+    t10e = std::chrono::high_resolution_clock::now();
+    t10 = std::chrono::duration<double>(t10e-t10s).count();
 
-    double slope = (t10 - t1)/9.0;
-    double dist  = t10 - slope * 10;
+    slope = (t10 - t1)/9.0;
+    dist  = t10 - slope * 10;
 
-    double est = (runtime - dist)/slope;
-    long estimated_niter = std::lround(est);
+    est = (runtime - dist)/slope;
+    estimated_niter = std::lround(est);
     params.niter = estimated_niter < 1 ? 1: (int)estimated_niter;
 
-    auto ts = std::chrono::high_resolution_clock::now();
+    ts = std::chrono::high_resolution_clock::now();
     hip_mpitest_compute_launch (params);
     HIP_CHECK(hipStreamSynchronize(params.stream));
-    auto te = std::chrono::high_resolution_clock::now();
+    te = std::chrono::high_resolution_clock::now();
 
     params.est_runtime = std::chrono::duration<double>(te-ts).count();
     //printf("runtime: %lf estimated niter %d K %d actual runtime %lf\n", runtime, params.niter, params.K, params.est_runtime);
+ out:
+    if (ret != hipSuccess) {
+        fprintf(stderr, "Error in hip_mpitest_compute_set_params. Aborting\n");
+        MPI_Abort (MPI_COMM_WORLD, 1);
+    }
     return;
 }
 
-void hip_mpitest_compute_launch (hip_mpitest_compute_params_t &params)
+int hip_mpitest_compute_launch (hip_mpitest_compute_params_t &params)
 {
     int threadsPerBlock=256;
     hipDeviceProp_t prop;
     int deviceId;
+    int ret = 0;
 
     HIP_CHECK(hipGetDevice(&deviceId));
     HIP_CHECK(hipGetDeviceProperties(&prop, deviceId));
@@ -146,10 +161,13 @@ void hip_mpitest_compute_launch (hip_mpitest_compute_params_t &params)
                                                                                             params.N,
                                                                                             params.K,
                                                                                             params.niter);
+ out:
+    return ret;
 }
 
 void hip_mpitest_compute_fini(hip_mpitest_compute_params_t &params)
 {
+    int ret;
     // Not sure we need these next two lines
     HIP_CHECK(hipMemcpy(params.Ahost, params.Adevice, params.N*sizeof(long), hipMemcpyDefault));
     HIP_CHECK(hipMemcpy(params.Afhost, params.Afdevice, params.N*sizeof(double), hipMemcpyDefault));
@@ -157,6 +175,9 @@ void hip_mpitest_compute_fini(hip_mpitest_compute_params_t &params)
     HIP_CHECK(hipStreamDestroy(params.stream));
     HIP_CHECK(hipFree(params.Adevice));
     HIP_CHECK(hipFree(params.Afdevice));
+ out:
     free (params.Ahost);
     free (params.Afhost);
+
+    return;
 }

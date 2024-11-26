@@ -35,7 +35,7 @@ typedef struct hip_mpitest_compute_params_s {
 
 int  hip_mpitest_compute_init(hip_mpitest_compute_params_t &params);
 void hip_mpitest_compute_set_params(hip_mpitest_compute_params_t &params, double runtime);
-void hip_mpitest_compute_launch (hip_mpitest_compute_params_t &params);
+int hip_mpitest_compute_launch (hip_mpitest_compute_params_t &params);
 void hip_mpitest_compute_fini(hip_mpitest_compute_params_t &params);
 
 #endif

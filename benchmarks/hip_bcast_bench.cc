@@ -75,9 +75,12 @@ int bcast_test (void *sendbuf, int count, MPI_Datatype datatype, MPI_Comm comm,
 
 int main (int argc, char *argv[])
 {
-    int res;
+    int ret;
     int rank, size;
     int root = 0;
+    std::chrono::high_resolution_clock::time_point t1s, t1e;
+    double t1;
+    double *tmp_sendbuf=NULL, *tmp_recvbuf=NULL;
 
     bind_device();
 
@@ -96,45 +99,45 @@ int main (int argc, char *argv[])
     }
 
     for (elements=1; elements<=max_elements; elements *=2 ) {
-        double *tmp_sendbuf=NULL, *tmp_recvbuf=NULL;
         int niter = elements >= NITER_THRESH ? NITER_LONG : NITER_SHORT;
+        tmp_sendbuf = NULL;
+        tmp_recvbuf = NULL;
 
         // Initialise send buffer
         ALLOCATE_SENDBUFFER(sendbuf, tmp_sendbuf, double, elements, sizeof(double),
-                            rank, MPI_COMM_WORLD, init_sendbuf);
+                            rank, MPI_COMM_WORLD, init_sendbuf, out);
 
         //Warmup
-        res = bcast_test (sendbuf->get_buffer(), elements, MPI_DOUBLE, MPI_COMM_WORLD, 1);
-        if (MPI_SUCCESS != res ) {
+        ret = bcast_test (sendbuf->get_buffer(), elements, MPI_DOUBLE, MPI_COMM_WORLD, 1);
+        if (MPI_SUCCESS != ret) {
             fprintf(stderr, "Error in bcast_test. Aborting\n");
-            MPI_Abort (MPI_COMM_WORLD, 1);
-            return 1;
+            goto out;
         }
 
         // execute the allreduce test
         MPI_Barrier(MPI_COMM_WORLD);
-        auto t1s = std::chrono::high_resolution_clock::now();
-        res = bcast_test (sendbuf->get_buffer(), elements, MPI_DOUBLE, MPI_COMM_WORLD, niter);
-        if (MPI_SUCCESS != res) {
+        t1s = std::chrono::high_resolution_clock::now();
+        ret = bcast_test (sendbuf->get_buffer(), elements, MPI_DOUBLE, MPI_COMM_WORLD, niter);
+        if (MPI_SUCCESS != ret) {
             fprintf(stderr, "Error in bcast_test. Aborting\n");
-            MPI_Abort (MPI_COMM_WORLD, 1);
-            return 1;
+            return ret;
         }
-        auto t1e = std::chrono::high_resolution_clock::now();
-        double t1 = std::chrono::duration<double>(t1e-t1s).count();
+        t1e = std::chrono::high_resolution_clock::now();
+        t1 = std::chrono::duration<double>(t1e-t1s).count();
 
 #if 0
         // verify results
-        bool ret = true;
+        bool res, fret;
+        res = true;
         if (sendbuf->NeedsStagingBuffer()) {
             HIP_CHECK(sendbuf->CopyFrom(tmp_sendbuf, elements*sizeof(double)));
-            ret = check_recvbuf(tmp_sendbuf, size, ROOT, elements);
+            res = check_recvbuf(tmp_sendbuf, size, ROOT, elements);
         }
         else {
-            ret = check_recvbuf((double*) sendbuf->get_buffer(), size, ROOT, elements);
+            res = check_recvbuf((double*) sendbuf->get_buffer(), size, ROOT, elements);
         }
 
-        bool fret = report_testresult(argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(), ret);
+        fret = report_testresult(argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(), res);
 #endif
         bench_performance (argv[0], MPI_COMM_WORLD, sendbuf->get_memchar(), recvbuf->get_memchar(),
                            elements, (size_t)(elements * sizeof(double)), niter, t1);
@@ -142,11 +145,14 @@ int main (int argc, char *argv[])
         //Free buffers
         FREE_BUFFER(sendbuf, tmp_sendbuf);
     }
-
+ out:
+    if (ret != MPI_SUCCESS) {
+        FREE_BUFFER(sendbuf, tmp_sendbuf);
+    }
     delete (sendbuf);
 
     MPI_Finalize ();
-    return 0;
+    return ret;
 }
 
 
